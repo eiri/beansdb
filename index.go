@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"sync"
 )
 
 const (
@@ -16,9 +17,8 @@ const (
 
 // Indexer is the interface for Datalog's index
 type Indexer interface {
-	Load() error
-	Read(score Score) (Addr, bool)
-	Write(score Score, a Addr) error
+	Load(score Score) (Addr, bool)
+	Store(score Score, a Addr) error
 }
 
 // Addr is data position and size in datalog
@@ -27,28 +27,22 @@ type Addr struct {
 	size int
 }
 
-// cache is in memory lookup store
-type cache map[Score]Addr
-
 // Index represents an index of a datalog file
 type Index struct {
-	cache cache
-	rw    io.ReadWriter
+	cache  *sync.Map
+	length int
+	rw     io.ReadWriter
 }
 
 // NewIndex returns a new index structure with the given name
-func NewIndex(rw io.ReadWriter) *Index {
-	return &Index{cache: make(cache), rw: rw}
-}
-
-// Load cache from giver Reader
-func (idx *Index) Load() error {
-	idx.cache = make(cache)
+func NewIndex(rw io.ReadWriter) (*Index, error) {
+	cache := new(sync.Map)
+	length := 0
 	for {
 		page := make([]byte, pageSize, pageSize)
-		n, err := idx.rw.Read(page)
+		n, err := rw.Read(page)
 		if err != nil && err != io.EOF {
-			return err
+			return nil, err
 		}
 		if err == io.EOF {
 			break
@@ -59,7 +53,7 @@ func (idx *Index) Load() error {
 			buf := make([]byte, bufSize, bufSize)
 			_, err := br.Read(buf)
 			if err != nil && err != io.EOF {
-				return err
+				return nil, err
 			}
 			if err == io.EOF {
 				break
@@ -67,21 +61,26 @@ func (idx *Index) Load() error {
 			pos := binary.BigEndian.Uint32(buf[0:intSize])
 			size := binary.BigEndian.Uint32(buf[intSize:doubleIntSize])
 			copy(score[:], buf[doubleIntSize:bufSize])
-			idx.cache[score] = Addr{pos: int(pos), size: int(size)}
+			cache.Store(score, Addr{pos: int(pos), size: int(size)})
+			length++
 		}
 	}
-	return nil
+	return &Index{cache: cache, length: length, rw: rw}, nil
 }
 
-// Read reads address of data for a given score
-func (idx *Index) Read(score Score) (a Addr, ok bool) {
-	a, ok = idx.cache[score]
-	return
+// Load returns the address stored in the index for a score
+// or an empty Addr if no address is present.
+// The ok result indicates if address was found in the index.
+func (idx *Index) Load(score Score) (Addr, bool) {
+	if a, ok := idx.cache.Load(score); ok {
+		return a.(Addr), true
+	}
+	return Addr{}, false
 }
 
-// Write writes given score into index file and adds it to the cache
-func (idx *Index) Write(score Score, a Addr) error {
-	if _, ok := idx.cache[score]; ok {
+// Store sets the address for a given score.
+func (idx *Index) Store(score Score, a Addr) error {
+	if _, ok := idx.cache.Load(score); ok {
 		return nil
 	}
 	buf := make([]byte, bufSize, bufSize)
@@ -90,8 +89,20 @@ func (idx *Index) Write(score Score, a Addr) error {
 	copy(buf[doubleIntSize:bufSize], score[:])
 	_, err := idx.rw.Write(buf)
 	if err != nil {
-		return fmt.Errorf("Index write failed: %s", err)
+		return fmt.Errorf("index write failed: %s", err)
 	}
-	idx.cache[score] = a
+	idx.cache.Store(score, a)
+	idx.length++
 	return nil
+}
+
+// Len returns the number of scores in the index.
+func (idx *Index) Len() int {
+	return idx.length
+	// length := 0
+	// idx.cache.Range(func(_, _ interface{}) bool {
+	// 	length++
+	// 	return true
+	// })
+	// return length
 }
