@@ -29,6 +29,21 @@ type Index struct {
 func NewIndex(reader io.Reader) (*Index, error) {
 	cache := make(cache)
 	idx := &Index{cache: cache}
+	blocks, err := scanReader(reader)
+	if err != nil {
+		return &Index{}, err
+	}
+
+	for block := range blocks {
+		size := int(binary.BigEndian.Uint32(block[:intSize]))
+		var score Score
+		copy(score[:], block[intSize:])
+		idx.Write(score, size+4)
+	}
+	return idx, nil
+}
+
+func scanReader(reader io.Reader) (<-chan []byte, error) {
 	scanner := bufio.NewScanner(reader)
 	blockSize := intSize + scoreSize
 	scanner.Split(func(data []byte, eof bool) (int, []byte, error) {
@@ -42,20 +57,18 @@ func NewIndex(reader io.Reader) (*Index, error) {
 		if len(data) < advance {
 			return 0, nil, nil
 		}
-		return advance, data[:blockSize], nil
+		return advance, data, nil
 	})
-
-	for scanner.Scan() {
-		block := scanner.Bytes()
-		size := int(binary.BigEndian.Uint32(block[:intSize]))
-		var score Score
-		copy(score[:], block[intSize:])
-		idx.Write(score, size+4)
-	}
-	if scanner.Err() != nil {
-		return &Index{}, scanner.Err()
-	}
-	return idx, nil
+	blocks := make(chan []byte)
+	go func() {
+		defer close(blocks)
+		for scanner.Scan() {
+			block := make([]byte, blockSize)
+			copy(block, scanner.Bytes())
+			blocks <- block
+		}
+	}()
+	return blocks, scanner.Err()
 }
 
 // Read reads address of data for a given score
