@@ -17,6 +17,10 @@ func (s Score) String() string {
 	return hex.EncodeToString(s[:])
 }
 
+func (s Score) UInt64() uint64 {
+	return binary.BigEndian.Uint64(s[:])
+}
+
 // MakeScore creates a score for a given data block
 func MakeScore(b []byte) Score {
 	sum := xxhash.Sum64(b)

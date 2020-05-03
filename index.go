@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"encoding/binary"
 	"io"
+
+	"github.com/cornelk/hashmap"
 )
 
 const (
@@ -17,17 +19,17 @@ type Addr struct {
 }
 
 // cache is in memory lookup store
-type cache map[Score]Addr
+// type cache map[Score]Addr
 
 // Index represents an index of a datalog file
 type Index struct {
-	cache cache
+	cache *hashmap.HashMap
 	cur   int
 }
 
 // NewIndex returns a new index structure with the given name
 func NewIndex(reader io.Reader) (*Index, error) {
-	cache := make(cache)
+	cache := &hashmap.HashMap{}
 	idx := &Index{cache: cache}
 	scanner := bufio.NewScanner(reader)
 	blockSize := intSize + scoreSize
@@ -60,20 +62,23 @@ func NewIndex(reader io.Reader) (*Index, error) {
 
 // Read reads address of data for a given score
 func (idx *Index) Read(score Score) (a Addr, ok bool) {
-	a, ok = idx.cache[score]
+	i, ok := idx.cache.Get(score.UInt64())
+	if ok {
+		a = i.(Addr)
+	}
 	return
 }
 
 // Write writes given score into index file and adds it to the cache
 func (idx *Index) Write(score Score, size int) {
-	if _, ok := idx.cache[score]; !ok {
+	if _, ok := idx.cache.Get(score.UInt64()); !ok {
 		addr := Addr{pos: idx.cur, size: size}
-		idx.cache[score] = addr
+		idx.cache.Set(score.UInt64(), addr)
 		idx.cur = addr.pos + addr.size
 	}
 }
 
 // Len returns current length of cache
 func (idx *Index) Len() int {
-	return len(idx.cache)
+	return idx.cache.Len()
 }

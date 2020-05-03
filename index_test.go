@@ -33,7 +33,7 @@ func TestIndex(t *testing.T) {
 		reader := bytes.NewReader([]byte{})
 		idx, err := NewIndex(reader)
 		assert.NoError(err)
-		assert.Len(idx.cache, 0)
+		assert.Equal(0, idx.cache.Len())
 		assert.Equal(0, idx.cur)
 	})
 
@@ -61,7 +61,7 @@ func TestIndex(t *testing.T) {
 		reader := readerFromDatalog()
 		idx, err := NewIndex(reader)
 		assert.NoError(err)
-		assert.Len(idx.cache, 8)
+		assert.Equal(8, idx.cache.Len())
 		assert.Equal(int(reader.Size()), idx.cur)
 	})
 
